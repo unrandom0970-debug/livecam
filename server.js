@@ -14,19 +14,13 @@ app.use(express.static(path.join(__dirname, "public")));
 const rooms = new Map();
 
 io.on("connection", (socket) => {
-    console.log("🟢 Usuario conectado:", socket.id);
+    console.log("🟢 Conectado:", socket.id);
 
     socket.on("join-room", (roomId) => {
         if (!roomId) return;
 
-        // Si el usuario ya estaba en otra sala, lo sacamos primero
-        if (socket.roomId) {
-            socket.leave(socket.roomId);
-        }
-
         const room = rooms.get(roomId) || new Set();
 
-        // Máximo 2 personas por llamada
         if (room.size >= 2) {
             socket.emit("room-full");
             return;
@@ -38,8 +32,6 @@ io.on("connection", (socket) => {
         socket.join(roomId);
         socket.roomId = roomId;
 
-        console.log(`👥 ${socket.id} entró a la sala ${roomId}`);
-
         socket.emit("joined-room", {
             roomId,
             users: room.size
@@ -48,11 +40,12 @@ io.on("connection", (socket) => {
         socket.to(roomId).emit("user-joined", {
             socketId: socket.id
         });
+
+        console.log(`👥 ${socket.id} → ${roomId}`);
     });
 
-    // WebRTC: oferta
     socket.on("offer", (data) => {
-        if (!data || !data.to || !data.offer) return;
+        if (!data?.to || !data?.offer) return;
 
         socket.to(data.to).emit("offer", {
             offer: data.offer,
@@ -60,9 +53,8 @@ io.on("connection", (socket) => {
         });
     });
 
-    // WebRTC: respuesta
     socket.on("answer", (data) => {
-        if (!data || !data.to || !data.answer) return;
+        if (!data?.to || !data?.answer) return;
 
         socket.to(data.to).emit("answer", {
             answer: data.answer,
@@ -70,9 +62,8 @@ io.on("connection", (socket) => {
         });
     });
 
-    // WebRTC: candidatos ICE
     socket.on("ice-candidate", (data) => {
-        if (!data || !data.to || !data.candidate) return;
+        if (!data?.to || !data?.candidate) return;
 
         socket.to(data.to).emit("ice-candidate", {
             candidate: data.candidate,
@@ -80,29 +71,27 @@ io.on("connection", (socket) => {
         });
     });
 
-    // Desconexión
     socket.on("disconnect", () => {
         const roomId = socket.roomId;
 
-        if (roomId && rooms.has(roomId)) {
-            const room = rooms.get(roomId);
+        if (!roomId || !rooms.has(roomId)) return;
 
-            room.delete(socket.id);
+        const room = rooms.get(roomId);
 
-            socket.to(roomId).emit("user-left", {
-                socketId: socket.id
-            });
+        room.delete(socket.id);
 
-            if (room.size === 0) {
-                rooms.delete(roomId);
-            }
+        socket.to(roomId).emit("user-left", {
+            socketId: socket.id
+        });
+
+        if (room.size === 0) {
+            rooms.delete(roomId);
         }
 
-        console.log("🔴 Usuario desconectado:", socket.id);
+        console.log("🔴 Desconectado:", socket.id);
     });
 });
 
-// IMPORTANTE PARA CLOUD
 server.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 LiveCam funcionando en puerto ${PORT}`);
+    console.log(`🚀 LiveCam activo en puerto ${PORT}`);
 });

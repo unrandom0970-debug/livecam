@@ -1,442 +1,401 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>LiveCam</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <script src="/socket.io/socket.io.js"></script>
+<title>LiveCam</title>
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+<style>
 
-        body {
-            margin: 0;
-            background: #101010;
-            color: white;
-            font-family: Arial, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
+*{
+    box-sizing:border-box;
+}
 
-        header {
-            padding: 18px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: bold;
-        }
+body{
+    margin:0;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#08090d;
+    color:white;
+    font-family:Arial,sans-serif;
+}
 
-        #videos {
-            position: relative;
-            flex: 1;
-            padding: 10px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
+.container{
+    width:min(420px,92%);
+    text-align:center;
+}
 
-        #remoteVideo {
-            width: 100%;
-            max-width: 900px;
-            max-height: 75vh;
-            background: #222;
-            border-radius: 18px;
-            object-fit: cover;
-        }
+.logo{
+    font-size:32px;
+    font-weight:800;
+    margin-bottom:35px;
+}
 
-        #localVideo {
-            position: absolute;
-            width: 150px;
-            height: 210px;
-            right: 25px;
-            bottom: 25px;
-            background: #222;
-            border-radius: 14px;
-            object-fit: cover;
-            border: 2px solid white;
-        }
+.logo span{
+    color:#6c63ff;
+}
 
-        #controls {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            padding: 20px;
-        }
+.card{
+    background:#111319;
+    border:1px solid #292d38;
+    border-radius:20px;
+    padding:25px;
+}
 
-        button {
-            border: none;
-            border-radius: 12px;
-            padding: 14px 20px;
-            font-size: 16px;
-            cursor: pointer;
-        }
+.video{
+    width:100%;
+    aspect-ratio:16/10;
+    background:#050609;
+    border-radius:15px;
+    overflow:hidden;
+    margin-bottom:20px;
+}
 
-        #start {
-            background: white;
-            color: black;
-        }
+video{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    transform:scaleX(-1);
+}
 
-        .control {
-            background: #292929;
-            color: white;
-        }
+button{
+    width:100%;
+    padding:14px;
+    border:0;
+    border-radius:12px;
+    background:#6c63ff;
+    color:white;
+    font-size:16px;
+    font-weight:700;
+    cursor:pointer;
+}
 
-        #status {
-            text-align: center;
-            padding: 10px;
-            color: #aaa;
-        }
+.status{
+    margin-top:15px;
+    color:#858b9b;
+    font-size:14px;
+}
 
-        #joinArea {
-            text-align: center;
-            padding: 30px;
-        }
+</style>
 
-        input {
-            padding: 14px;
-            border-radius: 10px;
-            border: none;
-            margin-right: 5px;
-        }
-    </style>
 </head>
 
 <body>
 
-<header>
-    🔥 LiveCam
-</header>
+<div class="container">
 
-<div id="joinArea">
+<div class="logo">
+🔥 Live<span>Cam</span>
+</div>
 
-    <input id="room" placeholder="ID de sala">
+<div class="card">
 
-    <button id="join">
-        Entrar a sala
-    </button>
+<div class="video">
+
+<video id="localVideo" autoplay muted playsinline></video>
 
 </div>
 
-<div id="videos">
+<button id="activate">
+Activar cámara y micrófono
+</button>
 
-    <video id="remoteVideo" autoplay playsinline></video>
-
-    <video id="localVideo" autoplay muted playsinline></video>
+<div class="status" id="status">
+Esperando permiso del navegador...
+</div>
 
 </div>
 
-<div id="status">
-    Esperando...
 </div>
 
-<div id="controls">
 
-    <button id="start">
-        📷 Activar cámara
-    </button>
-
-    <button class="control" id="mic">
-        🎤 Micrófono
-    </button>
-
-    <button class="control" id="cam">
-        📹 Cámara
-    </button>
-
-</div>
+<script src="/socket.io/socket.io.js"></script>
 
 <script>
 
 const socket = io();
 
-const joinButton = document.getElementById("join");
-const startButton = document.getElementById("start");
+const localVideo =
+document.getElementById("localVideo");
 
-const roomInput = document.getElementById("room");
+const activate =
+document.getElementById("activate");
 
-const localVideo = document.getElementById("localVideo");
-const remoteVideo = document.getElementById("remoteVideo");
+const status =
+document.getElementById("status");
 
-const status = document.getElementById("status");
+let localStream = null;
+let peer = null;
+let otherUser = null;
 
-let localStream;
-let peerConnection;
+const params =
+new URLSearchParams(location.search);
 
-let roomId;
-let otherUser;
-
-let micEnabled = true;
-let cameraEnabled = true;
-
-const configuration = {
-    iceServers: [
-        {
-            urls: "stun:stun.l.google.com:19302"
-        }
-    ]
-};
+const roomId =
+params.get("room");
 
 
-// ENTRAR A SALA
+if(!roomId){
 
-joinButton.onclick = () => {
+status.textContent =
+"No se especificó una sala.";
 
-    roomId = roomInput.value.trim();
-
-    if (!roomId) {
-        alert("Escribe un ID de sala");
-        return;
-    }
-
-    socket.emit("join-room", roomId);
-
-    status.textContent = "🟡 Entrando a la sala...";
-};
-
-
-// ACTIVAR CÁMARA
-
-startButton.onclick = async () => {
-
-    try {
-
-        localStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: "user"
-            },
-            audio: true
-        });
-
-        localVideo.srcObject = localStream;
-
-        startButton.textContent = "✅ Cámara activada";
-
-        status.textContent = "🟢 Cámara y micrófono activos";
-
-    } catch (error) {
-
-        console.error(error);
-
-        status.textContent =
-            "❌ No se pudo acceder a la cámara/micrófono.";
-
-    }
-
-};
-
-
-// USUARIO ENTRÓ
-
-socket.on("user-joined", async (data) => {
-
-    otherUser = data.socketId;
-
-    status.textContent =
-        "🟢 El otro usuario entró. Conectando cámara...";
-
-    await createOffer();
-
-});
-
-
-// CREAR CONEXIÓN
-
-async function createPeerConnection() {
-
-    peerConnection =
-        new RTCPeerConnection(configuration);
-
-    localStream.getTracks().forEach(track => {
-
-        peerConnection.addTrack(
-            track,
-            localStream
-        );
-
-    });
-
-    peerConnection.ontrack = event => {
-
-        remoteVideo.srcObject =
-            event.streams[0];
-
-    };
-
-    peerConnection.onicecandidate = event => {
-
-        if (event.candidate) {
-
-            socket.emit(
-                "ice-candidate",
-                {
-                    candidate: event.candidate,
-                    to: otherUser
-                }
-            );
-
-        }
-
-    };
+activate.disabled = true;
 
 }
 
 
-// OFERTA
+activate.onclick = async () => {
 
-async function createOffer() {
+try{
 
-    if (!localStream) {
+localStream =
+await navigator.mediaDevices.getUserMedia({
+    video:{
+        facingMode:"user"
+    },
+    audio:true
+});
 
-        status.textContent =
-            "📷 Activa tu cámara primero.";
+localVideo.srcObject =
+localStream;
 
-        return;
+activate.style.display="none";
 
-    }
+status.textContent =
+"Cámara y micrófono activados.";
 
-    await createPeerConnection();
+socket.emit(
+"join-room",
+roomId
+);
 
-    const offer =
-        await peerConnection.createOffer();
+}catch(error){
 
-    await peerConnection.setLocalDescription(
-        offer
-    );
+console.error(error);
 
-    socket.emit(
-        "offer",
-        {
-            offer,
-            to: otherUser
-        }
-    );
+status.textContent =
+"No se pudo acceder a la cámara o micrófono.";
+
+}
+
+};
+
+
+socket.on(
+"user-joined",
+async (data) => {
+
+otherUser =
+data.socketId;
+
+if(!localStream) return;
+
+await createOffer();
+
+});
+
+
+socket.on(
+"joined-room",
+(data) => {
+
+console.log(
+"Entraste a:",
+data.roomId
+);
+
+});
+
+
+async function createOffer(){
+
+peer =
+createPeer();
+
+const offer =
+await peer.createOffer();
+
+await peer.setLocalDescription(
+offer
+);
+
+socket.emit("offer",{
+
+to:otherUser,
+
+offer:offer
+
+});
 
 }
 
 
-// RECIBIR OFERTA
+socket.on(
+"offer",
+async (data) => {
 
-socket.on("offer", async data => {
+otherUser =
+data.from;
 
-    otherUser = data.from;
+peer =
+createPeer();
 
-    if (!localStream) {
+await peer.setRemoteDescription(
+data.offer
+);
 
-        status.textContent =
-            "📷 Activa tu cámara primero.";
+const answer =
+await peer.createAnswer();
 
-        return;
+await peer.setLocalDescription(
+answer
+);
 
-    }
+socket.emit("answer",{
 
-    await createPeerConnection();
+to:data.from,
 
-    await peerConnection.setRemoteDescription(
-        data.offer
-    );
+answer:answer
 
-    const answer =
-        await peerConnection.createAnswer();
-
-    await peerConnection.setLocalDescription(
-        answer
-    );
-
-    socket.emit(
-        "answer",
-        {
-            answer,
-            to: otherUser
-        }
-    );
+});
 
 });
 
 
-// RECIBIR RESPUESTA
+socket.on(
+"answer",
+async (data) => {
 
-socket.on("answer", async data => {
+if(!peer) return;
 
-    await peerConnection.setRemoteDescription(
-        data.answer
-    );
-
-});
-
-
-// ICE
-
-socket.on("ice-candidate", async data => {
-
-    if (peerConnection) {
-
-        try {
-
-            await peerConnection.addIceCandidate(
-                data.candidate
-            );
-
-        } catch (error) {
-
-            console.error(error);
-
-        }
-
-    }
+await peer.setRemoteDescription(
+data.answer
+);
 
 });
 
 
-// MICRÓFONO
+socket.on(
+"ice-candidate",
+async (data) => {
 
-document.getElementById("mic").onclick = () => {
+if(!peer) return;
 
-    if (!localStream) return;
+try{
 
-    micEnabled = !micEnabled;
+await peer.addIceCandidate(
+data.candidate
+);
 
-    localStream
-        .getAudioTracks()
-        .forEach(track => {
+}catch(error){
 
-            track.enabled = micEnabled;
+console.error(error);
 
-        });
+}
 
-    document.getElementById("mic").textContent =
-        micEnabled
-            ? "🎤 Micrófono"
-            : "🔇 Micrófono apagado";
+});
+
+
+function createPeer(){
+
+const connection =
+new RTCPeerConnection({
+
+iceServers:[
+
+{
+urls:
+"stun:stun.l.google.com:19302"
+}
+
+]
+
+});
+
+
+localStream
+.getTracks()
+.forEach(track => {
+
+connection.addTrack(
+track,
+localStream
+);
+
+});
+
+
+connection.onicecandidate =
+(event) => {
+
+if(event.candidate){
+
+socket.emit(
+"ice-candidate",
+{
+
+to:otherUser,
+
+candidate:event.candidate
+
+});
+
+}
 
 };
 
 
-// CÁMARA
+connection.ontrack =
+(event) => {
 
-document.getElementById("cam").onclick = () => {
-
-    if (!localStream) return;
-
-    cameraEnabled = !cameraEnabled;
-
-    localStream
-        .getVideoTracks()
-        .forEach(track => {
-
-            track.enabled = cameraEnabled;
-
-        });
-
-    document.getElementById("cam").textContent =
-        cameraEnabled
-            ? "📹 Cámara"
-            : "🚫 Cámara apagada";
+console.log(
+"🎥 Stream remoto recibido"
+);
 
 };
+
+
+connection.onconnectionstatechange =
+() => {
+
+console.log(
+"WebRTC:",
+connection.connectionState
+);
+
+};
+
+
+return connection;
+
+}
+
+
+socket.on(
+"room-full",
+() => {
+
+status.textContent =
+"Esta llamada ya está llena.";
+
+activate.disabled = true;
+
+});
+
+
+socket.on(
+"user-left",
+() => {
+
+status.textContent =
+"El otro usuario salió de la llamada.";
+
+});
 
 </script>
 
