@@ -14,15 +14,19 @@ app.use(express.static(path.join(__dirname, "public")));
 const rooms = new Map();
 
 io.on("connection", (socket) => {
-
     console.log("🟢 Usuario conectado:", socket.id);
 
     socket.on("join-room", (roomId) => {
-
         if (!roomId) return;
+
+        // Si el usuario ya estaba en otra sala, lo sacamos primero
+        if (socket.roomId) {
+            socket.leave(socket.roomId);
+        }
 
         const room = rooms.get(roomId) || new Set();
 
+        // Máximo 2 personas por llamada
         if (room.size >= 2) {
             socket.emit("room-full");
             return;
@@ -34,7 +38,7 @@ io.on("connection", (socket) => {
         socket.join(roomId);
         socket.roomId = roomId;
 
-        console.log(`👥 ${socket.id} entró a ${roomId}`);
+        console.log(`👥 ${socket.id} entró a la sala ${roomId}`);
 
         socket.emit("joined-room", {
             roomId,
@@ -46,51 +50,41 @@ io.on("connection", (socket) => {
         });
     });
 
-
-    // 📡 WEBRTC: OFERTA
-
+    // WebRTC: oferta
     socket.on("offer", (data) => {
+        if (!data || !data.to || !data.offer) return;
 
         socket.to(data.to).emit("offer", {
             offer: data.offer,
             from: socket.id
         });
-
     });
 
-
-    // 📡 WEBRTC: RESPUESTA
-
+    // WebRTC: respuesta
     socket.on("answer", (data) => {
+        if (!data || !data.to || !data.answer) return;
 
         socket.to(data.to).emit("answer", {
             answer: data.answer,
             from: socket.id
         });
-
     });
 
-
-    // 📡 WEBRTC: ICE
-
+    // WebRTC: candidatos ICE
     socket.on("ice-candidate", (data) => {
+        if (!data || !data.to || !data.candidate) return;
 
         socket.to(data.to).emit("ice-candidate", {
             candidate: data.candidate,
             from: socket.id
         });
-
     });
 
-
-    // 🔴 DESCONECTAR
-
+    // Desconexión
     socket.on("disconnect", () => {
-
         const roomId = socket.roomId;
 
         if (roomId && rooms.has(roomId)) {
-
             const room = rooms.get(roomId);
 
             room.delete(socket.id);
@@ -105,15 +99,10 @@ io.on("connection", (socket) => {
         }
 
         console.log("🔴 Usuario desconectado:", socket.id);
-
     });
-
 });
 
-server.listen(PORT, () => {
-
-    console.log(
-        `🚀 LiveCam funcionando en http://localhost:${PORT}`
-    );
-
+// IMPORTANTE PARA CLOUD
+server.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 LiveCam funcionando en puerto ${PORT}`);
 });
