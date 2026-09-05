@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>LiveCam</title>
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: #101010;
+            color: white;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 18px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #videos {
+            position: relative;
+            flex: 1;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #remoteVideo {
+            width: 100%;
+            max-width: 900px;
+            max-height: 75vh;
+            background: #222;
+            border-radius: 18px;
+            object-fit: cover;
+        }
+
+        #localVideo {
+            position: absolute;
+            width: 150px;
+            height: 210px;
+            right: 25px;
+            bottom: 25px;
+            background: #222;
+            border-radius: 14px;
+            object-fit: cover;
+            border: 2px solid white;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            padding: 20px;
+        }
+
+        button {
+            border: none;
+            border-radius: 12px;
+            padding: 14px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #start {
+            background: white;
+            color: black;
+        }
+
+        .control {
+            background: #292929;
+            color: white;
+        }
+
+        #status {
+            text-align: center;
+            padding: 10px;
+            color: #aaa;
+        }
+
+        #joinArea {
+            text-align: center;
+            padding: 30px;
+        }
+
+        input {
+            padding: 14px;
+            border-radius: 10px;
+            border: none;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    🔥 LiveCam
+</header>
+
+<div id="joinArea">
+
+    <input id="room" placeholder="ID de sala">
+
+    <button id="join">
+        Entrar a sala
+    </button>
+
+</div>
+
+<div id="videos">
+
+    <video id="remoteVideo" autoplay playsinline></video>
+
+    <video id="localVideo" autoplay muted playsinline></video>
+
+</div>
+
+<div id="status">
+    Esperando...
+</div>
+
+<div id="controls">
+
+    <button id="start">
+        📷 Activar cámara
+    </button>
+
+    <button class="control" id="mic">
+        🎤 Micrófono
+    </button>
+
+    <button class="control" id="cam">
+        📹 Cámara
+    </button>
+
+</div>
+
+<script>
+
+const socket = io();
+
+const joinButton = document.getElementById("join");
+const startButton = document.getElementById("start");
+
+const roomInput = document.getElementById("room");
+
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+
+const status = document.getElementById("status");
+
+let localStream;
+let peerConnection;
+
+let roomId;
+let otherUser;
+
+let micEnabled = true;
+let cameraEnabled = true;
+
+const configuration = {
+    iceServers: [
+        {
+            urls: "stun:stun.l.google.com:19302"
+        }
+    ]
+};
+
+
+// ENTRAR A SALA
+
+joinButton.onclick = () => {
+
+    roomId = roomInput.value.trim();
+
+    if (!roomId) {
+        alert("Escribe un ID de sala");
+        return;
+    }
+
+    socket.emit("join-room", roomId);
+
+    status.textContent = "🟡 Entrando a la sala...";
+};
+
+
+// ACTIVAR CÁMARA
+
+startButton.onclick = async () => {
+
+    try {
+
+        localStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: "user"
+            },
+            audio: true
+        });
+
+        localVideo.srcObject = localStream;
+
+        startButton.textContent = "✅ Cámara activada";
+
+        status.textContent = "🟢 Cámara y micrófono activos";
+
+    } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+            "❌ No se pudo acceder a la cámara/micrófono.";
+
+    }
+
+};
+
+
+// USUARIO ENTRÓ
+
+socket.on("user-joined", async (data) => {
+
+    otherUser = data.socketId;
+
+    status.textContent =
+        "🟢 El otro usuario entró. Conectando cámara...";
+
+    await createOffer();
+
+});
+
+
+// CREAR CONEXIÓN
+
+async function createPeerConnection() {
+
+    peerConnection =
+        new RTCPeerConnection(configuration);
+
+    localStream.getTracks().forEach(track => {
+
+        peerConnection.addTrack(
+            track,
+            localStream
+        );
+
+    });
+
+    peerConnection.ontrack = event => {
+
+        remoteVideo.srcObject =
+            event.streams[0];
+
+    };
+
+    peerConnection.onicecandidate = event => {
+
+        if (event.candidate) {
+
+            socket.emit(
+                "ice-candidate",
+                {
+                    candidate: event.candidate,
+                    to: otherUser
+                }
+            );
+
+        }
+
+    };
+
+}
+
+
+// OFERTA
+
+async function createOffer() {
+
+    if (!localStream) {
+
+        status.textContent =
+            "📷 Activa tu cámara primero.";
+
+        return;
+
+    }
+
+    await createPeerConnection();
+
+    const offer =
+        await peerConnection.createOffer();
+
+    await peerConnection.setLocalDescription(
+        offer
+    );
+
+    socket.emit(
+        "offer",
+        {
+            offer,
+            to: otherUser
+        }
+    );
+
+}
+
+
+// RECIBIR OFERTA
+
+socket.on("offer", async data => {
+
+    otherUser = data.from;
+
+    if (!localStream) {
+
+        status.textContent =
+            "📷 Activa tu cámara primero.";
+
+        return;
+
+    }
+
+    await createPeerConnection();
+
+    await peerConnection.setRemoteDescription(
+        data.offer
+    );
+
+    const answer =
+        await peerConnection.createAnswer();
+
+    await peerConnection.setLocalDescription(
+        answer
+    );
+
+    socket.emit(
+        "answer",
+        {
+            answer,
+            to: otherUser
+        }
+    );
+
+});
+
+
+// RECIBIR RESPUESTA
+
+socket.on("answer", async data => {
+
+    await peerConnection.setRemoteDescription(
+        data.answer
+    );
+
+});
+
+
+// ICE
+
+socket.on("ice-candidate", async data => {
+
+    if (peerConnection) {
+
+        try {
+
+            await peerConnection.addIceCandidate(
+                data.candidate
+            );
+
+        } catch (error) {
+
+            console.error(error);
+
+        }
+
+    }
+
+});
+
+
+// MICRÓFONO
+
+document.getElementById("mic").onclick = () => {
+
+    if (!localStream) return;
+
+    micEnabled = !micEnabled;
+
+    localStream
+        .getAudioTracks()
+        .forEach(track => {
+
+            track.enabled = micEnabled;
+
+        });
+
+    document.getElementById("mic").textContent =
+        micEnabled
+            ? "🎤 Micrófono"
+            : "🔇 Micrófono apagado";
+
+};
+
+
+// CÁMARA
+
+document.getElementById("cam").onclick = () => {
+
+    if (!localStream) return;
+
+    cameraEnabled = !cameraEnabled;
+
+    localStream
+        .getVideoTracks()
+        .forEach(track => {
+
+            track.enabled = cameraEnabled;
+
+        });
+
+    document.getElementById("cam").textContent =
+        cameraEnabled
+            ? "📹 Cámara"
+            : "🚫 Cámara apagada";
+
+};
+
+</script>
+
+</body>
+</html>
